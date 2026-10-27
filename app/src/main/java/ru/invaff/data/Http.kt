@@ -9,7 +9,7 @@ import org.json.JSONObject
 import java.net.URL
 import javax.net.ssl.HttpsURLConnection
 
-class ApiError(code: Int, body: String) : Exception("HTTP $code ${body.take(160)}")
+class ApiError(val code: Int, val body: String) : Exception("HTTP $code ${body.take(160)}")
 
 internal object Http {
     private val limit = Semaphore(8)

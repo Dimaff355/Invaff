@@ -105,11 +105,13 @@ class Store(private val vault: Vault) {
                 val fx = Fx.load()
                 val from = Instant.now().minus(HISTORY_DAYS, ChronoUnit.DAYS)
                 brokers.values.map { b ->
+                    // Позиции и выплаты независимы: сбой одного не прячет другое.
                     async {
-                        runCatching { b.positions(fx) to b.payments(from, fx) }
-                            .onFailure { errors += "${b.title}: ${it.message}" }.getOrNull()
+                        val payments = async { runCatching { b.payments(from, fx) }.onFailure { errors += "${b.title}, выплаты: ${it.message}" }.getOrDefault(emptyList()) }
+                        val positions = runCatching { b.positions(fx) }.onFailure { errors += "${b.title}: ${it.message}" }.getOrDefault(emptyList())
+                        positions to payments.await()
                     }
-                }.awaitAll().filterNotNull()
+                }.awaitAll()
             }.onFailure { errors += "Курсы ЦБ: ${it.message}" }.getOrDefault(emptyList())
             val positions = merge(data.flatMap { it.first })
             ui = ui.copy(positions = positions, payments = data.flatMap { it.second }.sortedByDescending { it.date }, errors = errors)

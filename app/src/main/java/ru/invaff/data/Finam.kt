@@ -88,15 +88,22 @@ class Finam(private val secret: String) : Broker {
         }.getOrDefault(Asset("", Kind.Other, null))
     }
 
-    /** Не больше 1000 транзакций за запрос, поэтому история запрашивается по годам. */
+    /**
+     * Не больше 1000 транзакций за запрос, поэтому история запрашивается по годам.
+     * Старше ~2017 года истории нет: на такой интервал Финам отвечает 400 «StartTime must be less then endTime» — это пустой год.
+     */
     override suspend fun payments(from: Instant, fx: Fx) = coroutineScope {
         val now = Instant.now()
         val years = generateSequence(from) { it.plus(365, ChronoUnit.DAYS) }.takeWhile { it < now }.toList()
         val items = accounts().flatMap { id -> years.map { id to it } }.map { (id, start) ->
             async {
                 val end = minOf(start.plus(365, ChronoUnit.DAYS), now)
-                get("accounts/$id/transactions?interval.start_time=${start.sec()}&interval.end_time=${end.sec()}&limit=1000")
-                    .optJSONArray("transactions").objects()
+                val page = try {
+                    get("accounts/$id/transactions?interval.start_time=${start.sec()}&interval.end_time=${end.sec()}&limit=1000")
+                } catch (e: ApiError) {
+                    if (e.code == 400 && "StartTime" in e.body) JSONObject() else throw e
+                }
+                page.optJSONArray("transactions").objects()
                     .filter { it.optString("category") == "INCOME" && it.optString("symbol").isNotEmpty() }
                     .map { id to it }
             }
