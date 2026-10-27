@@ -18,7 +18,9 @@ class Finam(private val secret: String) : Broker {
     private val mutex = Mutex()
     private var jwt = ""
     private var jwtUntil = 0L
-    private val assets = ConcurrentHashMap<String, Pair<String, Kind>>()
+    private class Asset(val name: String, val kind: Kind, val logo: String?)
+
+    private val assets = ConcurrentHashMap<String, Asset>()
 
     /** Секрет обменивается на JWT, который живёт ~15 минут. */
     private suspend fun jwt() = mutex.withLock {
@@ -52,15 +54,15 @@ class Finam(private val secret: String) : Broker {
 
     private suspend fun position(p: JSONObject, account: String, fx: Fx): Position {
         val symbol = p.getString("symbol")
-        val (name, kind) = asset(symbol, account)
+        val asset = asset(symbol, account)
         val currency = p.optString("current_price_currency").takeIf { it.length == 3 } ?: "RUB"
         val rate = fx[currency]
         val qty = p.decimal("quantity")
         val price = p.decimal("current_price")
         return Position(
             ticker = symbol.substringBefore('@'),
-            name = name,
-            kind = kind,
+            name = asset.name,
+            kind = asset.kind,
             qty = qty,
             price = price,
             currency = currency,
@@ -68,41 +70,52 @@ class Finam(private val secret: String) : Broker {
             profit = p.decimal("unrealized_pnl") * rate,
             day = p.decimal("daily_pnl") * rate,
             refs = mapOf(title to symbol),
+            logo = asset.logo,
         )
     }
 
     private suspend fun asset(symbol: String, account: String) = assets.getOrPut(symbol) {
         runCatching {
             val a = get("assets/${Uri.encode(symbol, "@")}?account_id=$account")
-            a.optString("name") to when (a.optString("type")) {
+            val kind = when (a.optString("type")) {
                 "EQUITIES" -> Kind.Share
                 "BONDS" -> Kind.Bond
                 "FUNDS", "ETF" -> Kind.Fund
                 "CURRENCIES" -> Kind.Currency
                 else -> Kind.Other
             }
-        }.getOrDefault("" to Kind.Other)
+            Asset(a.optString("name"), kind, Logos.byIsin(a.optString("isin")))
+        }.getOrDefault(Asset("", Kind.Other, null))
     }
 
+    /** Не больше 1000 транзакций за запрос, поэтому история запрашивается по годам. */
     override suspend fun payments(from: Instant, fx: Fx) = coroutineScope {
-        accounts().map { id ->
+        val now = Instant.now()
+        val years = generateSequence(from) { it.plus(365, ChronoUnit.DAYS) }.takeWhile { it < now }.toList()
+        val items = accounts().flatMap { id -> years.map { id to it } }.map { (id, start) ->
             async {
-                get("accounts/$id/transactions?interval.start_time=${from.sec()}&interval.end_time=${Instant.now().sec()}&limit=1000")
+                val end = minOf(start.plus(365, ChronoUnit.DAYS), now)
+                get("accounts/$id/transactions?interval.start_time=${start.sec()}&interval.end_time=${end.sec()}&limit=1000")
                     .optJSONArray("transactions").objects()
                     .filter { it.optString("category") == "INCOME" && it.optString("symbol").isNotEmpty() }
-                    .map {
-                        val symbol = it.getString("symbol")
-                        Payment(
-                            date = Instant.parse(it.getString("timestamp")),
-                            ticker = symbol.substringBefore('@'),
-                            name = assets[symbol]?.first.orEmpty(),
-                            amount = it.money("change") * fx[it.getJSONObject("change").optString("currency_code")],
-                            coupon = it.optString("transaction_name").contains("упон"),
-                            broker = title,
-                        )
-                    }
+                    .map { id to it }
             }
         }.awaitAll().flatten()
+        // Название и логотип — по одному запросу на бумагу, в том числе уже проданную.
+        val found = items.distinctBy { it.second.getString("symbol") }
+            .map { (id, t) -> async { t.getString("symbol").let { it to asset(it, id) } } }.awaitAll().toMap()
+        items.map { (_, t) ->
+            val symbol = t.getString("symbol")
+            Payment(
+                date = Instant.parse(t.getString("timestamp")),
+                ticker = symbol.substringBefore('@'),
+                name = found[symbol]?.name.orEmpty(),
+                amount = t.money("change") * fx[t.getJSONObject("change").optString("currency_code")],
+                coupon = t.optString("transaction_name").contains("упон"),
+                broker = title,
+                logo = found[symbol]?.logo,
+            )
+        }.distinct()
     }
 
     override suspend fun candles(ref: String, from: Instant) =

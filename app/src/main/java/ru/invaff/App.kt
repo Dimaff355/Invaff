@@ -16,6 +16,7 @@ import ru.invaff.data.Broker
 import ru.invaff.data.Finam
 import ru.invaff.data.Fx
 import ru.invaff.data.Kind
+import ru.invaff.data.Logos
 import ru.invaff.data.Payment
 import ru.invaff.data.Point
 import ru.invaff.data.Position
@@ -27,10 +28,16 @@ import java.time.temporal.ChronoUnit
 
 class App : Application() {
     val store by lazy { Store(Vault(this)) }
+
+    override fun onCreate() {
+        super.onCreate()
+        Logos.dir = cacheDir
+    }
 }
 
 data class Ui(
     val positions: List<Position> = emptyList(),
+    /** Дивиденды и купоны за [Store.HISTORY_DAYS], новые сверху. */
     val payments: List<Payment> = emptyList(),
     /** Стоимость текущего состава портфеля за год (по дневным закрытиям). */
     val history: List<Point> = emptyList(),
@@ -38,7 +45,9 @@ data class Ui(
     val errors: List<String> = emptyList(),
 ) {
     val total get() = positions.sumOf { it.value }
-    val income get() = payments.sumOf { it.amount }
+
+    /** Пассивный доход за последние 12 месяцев. */
+    val income get() = payments.filter { it.date > Instant.now().minus(365, ChronoUnit.DAYS) }.sumOf { it.amount }
 }
 
 /** Единственный источник состояния приложения; живёт в Application, поэтому переживает поворот экрана. */
@@ -52,6 +61,23 @@ class Store(private val vault: Vault) {
     /** Названия подключённых брокеров. */
     var connected by mutableStateOf(brokers.keys)
         private set
+
+    /** Вход по биометрии включён; locked — приложение сейчас заблокировано. */
+    var lock by mutableStateOf(vault.lock)
+        private set
+    var locked by mutableStateOf(vault.lock)
+
+    /** Когда приложение ушло в фон (elapsedRealtime) и показан ли уже автоматический запрос — для MainActivity. */
+    var hiddenAt = 0L
+    var prompted = false
+
+    fun enableLock(on: Boolean) {
+        vault.lock = on
+        lock = on
+    }
+
+    /** Последние символы сохранённого токена — чтобы было видно, какой ключ подключён. */
+    fun tail(name: String) = vault[name]?.takeLast(4)
 
     init {
         refresh()
@@ -77,7 +103,7 @@ class Store(private val vault: Vault) {
             val errors = mutableListOf<String>()
             val data = runCatching {
                 val fx = Fx.load()
-                val from = Instant.now().minus(365, ChronoUnit.DAYS)
+                val from = Instant.now().minus(HISTORY_DAYS, ChronoUnit.DAYS)
                 brokers.values.map { b ->
                     async {
                         runCatching { b.positions(fx) to b.payments(from, fx) }
@@ -121,6 +147,7 @@ class Store(private val vault: Vault) {
     companion object {
         const val TBANK = "tbank"
         const val FINAM = "finam"
+        const val HISTORY_DAYS = 3653L
         private const val DAY = 86_400L
     }
 }

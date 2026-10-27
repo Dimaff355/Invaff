@@ -1,5 +1,6 @@
 package ru.invaff.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -18,14 +19,20 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import ru.invaff.data.Logos
 import ru.invaff.data.Position
 import java.time.Instant
 import java.time.ZoneId
@@ -90,10 +97,18 @@ fun Chips(options: List<String>, selected: Int, onSelect: (Int) -> Unit) = Row(
 }
 
 @Composable
-fun Avatar(p: Position, size: Int = 40) {
-    val bg = p.color?.let(::Color) ?: MaterialTheme.colorScheme.surfaceContainerHighest
-    Box(Modifier.size(size.dp).clip(CircleShape).background(bg), contentAlignment = Alignment.Center) {
-        Text(p.ticker.take(1), color = if (bg.luminance() > 0.5f) Color.Black else Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+fun Avatar(p: Position, size: Int = 40) = Avatar(p.ticker, p.color, p.logo, size)
+
+/** Логотип эмитента; пока он грузится или если его нет — буква тикера на цвете бренда. */
+@Composable
+fun Avatar(ticker: String, color: Int?, logo: String?, size: Int = 40) {
+    val bitmap by produceState(logo?.let(Logos::cached), logo) { if (logo != null && value == null) value = Logos.load(logo) }
+    val image = remember(bitmap) { bitmap?.asImageBitmap() }
+    val shape = Modifier.size(size.dp).clip(CircleShape)
+    if (image != null) return Image(image, ticker, shape, contentScale = ContentScale.Crop)
+    val bg = color?.let(::Color) ?: MaterialTheme.colorScheme.surfaceContainerHighest
+    Box(shape.background(bg), contentAlignment = Alignment.Center) {
+        Text(ticker.take(1), color = if (bg.luminance() > 0.5f) Color.Black else Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
     }
 }
 

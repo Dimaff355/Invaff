@@ -25,6 +25,11 @@ class Vault(context: Context) {
                 )
             }.generateKey()
 
+    /** Блокировка входа биометрией (не секрет, хранится открыто). */
+    var lock: Boolean
+        get() = prefs.getBoolean("lock", false)
+        set(v) = prefs.edit().putBoolean("lock", v).apply()
+
     operator fun get(name: String): String? = prefs.getString(name, null)?.let {
         runCatching {
             val b = Base64.decode(it, Base64.NO_WRAP)

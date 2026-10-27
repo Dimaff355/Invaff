@@ -74,7 +74,7 @@ fun AssetScreen(p: Position, ui: Ui, store: Store, back: () -> Unit) {
                 "Брокеры: " + p.refs.keys.joinToString(), Modifier.padding(top = 8.dp),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (payments.isNotEmpty()) Section("Выплаты за год · ${money(payments.sumOf { it.amount })}")
+            if (payments.isNotEmpty()) Section("Выплаты · ${money(payments.sumOf { it.amount })}")
         }
         items(payments) { PaymentRow(it) }
     }

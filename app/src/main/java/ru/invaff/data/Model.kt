@@ -18,13 +18,18 @@ data class Position(
     /** Брокер → идентификатор инструмента у него (для свечей). */
     val refs: Map<String, String>,
     val color: Int? = null,
+    /** URL логотипа (см. [Logos]). */
+    val logo: String? = null,
 ) {
     val key get() = "$kind:$ticker"
     val profitPct get() = if (value - profit != 0.0) profit / (value - profit) * 100 else 0.0
 }
 
 /** Выплата (дивиденд или купон) в рублях. */
-data class Payment(val date: Instant, val ticker: String, val name: String, val amount: Double, val coupon: Boolean, val broker: String)
+data class Payment(
+    val date: Instant, val ticker: String, val name: String, val amount: Double, val coupon: Boolean, val broker: String,
+    val logo: String? = null,
+)
 
 /** Точка графика: t — секунды epoch. */
 data class Point(val t: Long, val v: Double)
@@ -61,6 +66,7 @@ fun merge(positions: List<Position>) = positions.groupBy { it.key }.values.map {
             day = a.day + b.day,
             refs = b.refs + a.refs,
             color = a.color ?: b.color,
+            logo = a.logo ?: b.logo,
         )
     }
 }.sortedByDescending { it.value }

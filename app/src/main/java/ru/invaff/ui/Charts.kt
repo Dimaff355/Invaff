@@ -104,9 +104,9 @@ fun Donut(slices: List<Pair<Color, Double>>, modifier: Modifier = Modifier, cent
     }
 }
 
-/** Столбики по периодам; касание показывает значение. */
+/** Столбики по периодам; касание показывает значение, tick — короткая подпись под столбцом. */
 @Composable
-fun Bars(bars: List<Pair<String, Double>>, format: (Double) -> String, modifier: Modifier = Modifier) {
+fun Bars(bars: List<Pair<String, Double>>, format: (Double) -> String, modifier: Modifier = Modifier, tick: (String) -> String = { it.take(1) }) {
     var sel by remember(bars) { mutableStateOf<Int?>(null) }
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     val max = bars.maxOfOrNull { it.second }?.takeIf { it > 0 } ?: 1.0
@@ -128,7 +128,7 @@ fun Bars(bars: List<Pair<String, Double>>, format: (Double) -> String, modifier:
         }
         Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
             bars.forEach { (l, _) ->
-                Text(l.take(1), Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = muted, textAlign = TextAlign.Center)
+                Text(tick(l), Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = muted, textAlign = TextAlign.Center)
             }
         }
     }

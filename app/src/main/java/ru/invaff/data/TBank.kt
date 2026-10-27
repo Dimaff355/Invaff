@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap
 class TBank(private val token: String) : Broker {
     override val title = "Т-Банк"
 
-    private class Info(val name: String, val color: Int?)
+    private class Info(val name: String, val color: Int?, val logo: String?)
 
     private val info = ConcurrentHashMap<String, Info>()
 
@@ -57,21 +57,27 @@ class TBank(private val token: String) : Broker {
             day = p.money("dailyYield") * rate,
             refs = mapOf(title to uid),
             color = i.color,
+            logo = i.logo,
         )
     }
 
     private suspend fun lookup(uid: String) = runCatching {
         val i = rpc("InstrumentsService/GetInstrumentBy", JSONObject().put("idType", "INSTRUMENT_ID_TYPE_UID").put("id", uid))
             .getJSONObject("instrument")
-        Info(i.optString("name"), i.optJSONObject("brand")?.optString("logoBaseColor")?.let { runCatching { android.graphics.Color.parseColor(it) }.getOrNull() })
-    }.getOrDefault(Info("", null))
+        val brand = i.optJSONObject("brand")
+        Info(
+            i.optString("name"),
+            brand?.optString("logoBaseColor")?.let { runCatching { android.graphics.Color.parseColor(it) }.getOrNull() },
+            brand?.optString("logoName")?.let(Logos::byName) ?: Logos.byIsin(i.optString("isin")),
+        )
+    }.getOrDefault(Info("", null, null))
 
     override suspend fun payments(from: Instant, fx: Fx) = coroutineScope {
         accounts().map { async { operations(it, from, fx) } }.awaitAll().flatten()
     }
 
-    private suspend fun operations(account: String, from: Instant, fx: Fx): List<Payment> {
-        val out = mutableListOf<Payment>()
+    private suspend fun operations(account: String, from: Instant, fx: Fx): List<Payment> = coroutineScope {
+        val items = mutableListOf<JSONObject>()
         var cursor = ""
         do {
             val r = rpc(
@@ -81,19 +87,23 @@ class TBank(private val token: String) : Broker {
                     .put("operationTypes", JSONArray(listOf("OPERATION_TYPE_DIVIDEND", "OPERATION_TYPE_COUPON")))
                     .put("withoutCommissions", true).put("withoutTrades", true).put("withoutOvernights", true)
             )
-            r.optJSONArray("items").objects().mapTo(out) {
-                Payment(
-                    date = Instant.parse(it.getString("date")),
-                    ticker = it.optString("ticker"),
-                    name = it.optString("name"),
-                    amount = it.money("payment") * fx[it.getJSONObject("payment").optString("currency")],
-                    coupon = it.optString("type") == "OPERATION_TYPE_COUPON",
-                    broker = title,
-                )
-            }
+            items += r.optJSONArray("items").objects()
             cursor = r.optString("nextCursor")
         } while (r.optBoolean("hasNext"))
-        return out
+        // Логотипы и для уже проданных бумаг: по одному запросу на инструмент.
+        val logos = items.map { it.optString("instrumentUid") }.filter { it.isNotEmpty() }.distinct()
+            .map { uid -> async { uid to info.getOrPut(uid) { lookup(uid) }.logo } }.awaitAll().toMap()
+        items.map {
+            Payment(
+                date = Instant.parse(it.getString("date")),
+                ticker = it.optString("ticker"),
+                name = it.optString("name"),
+                amount = it.money("payment") * fx[it.getJSONObject("payment").optString("currency")],
+                coupon = it.optString("type") == "OPERATION_TYPE_COUPON",
+                broker = title,
+                logo = logos[it.optString("instrumentUid")],
+            )
+        }
     }
 
     override suspend fun candles(ref: String, from: Instant) = rpc(

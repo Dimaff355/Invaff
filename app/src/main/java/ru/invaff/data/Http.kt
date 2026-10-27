@@ -15,7 +15,10 @@ internal object Http {
     private val limit = Semaphore(8)
 
     /** GET, либо POST JSON, если передан body. Только HTTPS: приведение к HttpsURLConnection упадёт на http://. */
-    suspend fun call(url: String, body: String? = null, auth: String? = null): String = limit.withPermit {
+    suspend fun call(url: String, body: String? = null, auth: String? = null): String =
+        limit.withPermit { String(bytes(url, body, auth)) }
+
+    suspend fun bytes(url: String, body: String? = null, auth: String? = null): ByteArray =
         withContext(Dispatchers.IO) {
             val c = URL(url).openConnection() as HttpsURLConnection
             try {
@@ -29,14 +32,13 @@ internal object Http {
                     c.outputStream.use { it.write(body.toByteArray()) }
                 }
                 val code = c.responseCode
-                val text = (if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
-                if (code >= 400) throw ApiError(code, text)
-                text
+                val data = (if (code < 400) c.inputStream else c.errorStream)?.use { it.readBytes() } ?: ByteArray(0)
+                if (code >= 400) throw ApiError(code, String(data))
+                data
             } finally {
                 c.disconnect()
             }
         }
-    }
 }
 
 internal fun JSONArray?.objects() = if (this == null) emptyList() else List(length()) { getJSONObject(it) }
