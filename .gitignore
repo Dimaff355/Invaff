@@ -1,0 +1,15 @@
+# секреты и локальные заметки агента
+.env
+AGENTS.md
+HELP.md
+local.properties
+*.keystore
+*.jks
+signing/
+
+.gradle/
+.kotlin/
+build/
+.idea/
+*.iml
+captures/

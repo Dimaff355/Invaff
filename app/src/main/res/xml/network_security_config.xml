@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Только HTTPS. Корень Минцифры (Russian Trusted Root CA, sha256 D2:6D:2D:02…CF:31) — лишь для API Т-Банка. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">invest-public-api.tbank.ru</domain>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/russian_trusted_root_ca" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>
