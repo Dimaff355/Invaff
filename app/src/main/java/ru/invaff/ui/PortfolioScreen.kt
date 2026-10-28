@@ -26,13 +26,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ru.invaff.Ui
+import ru.invaff.data.Plan
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 
 val periods = listOf("1М" to 30L, "3М" to 91L, "6М" to 182L, "1Г" to 365L)
 
 @Composable
-fun PortfolioScreen(ui: Ui, open: (String) -> Unit) {
+fun PortfolioScreen(ui: Ui, plan: Plan, update: (Plan) -> Unit, open: (String) -> Unit) {
     var period by rememberSaveable { mutableIntStateOf(3) }
     val total = ui.total
     val profit = ui.positions.sumOf { it.profit }
@@ -58,6 +59,7 @@ fun PortfolioScreen(ui: Ui, open: (String) -> Unit) {
                 Stat("Дох-ть за год", share(if (total > 0) ui.income / total * 100 else 0.0), Modifier.weight(1f))
             }
         }
+        item { Goals(ui, plan, update) }
         item { Allocation(ui) }
         val best = ui.positions.filter { it.profit != 0.0 }.sortedByDescending { it.profitPct }
         if (best.isNotEmpty()) {

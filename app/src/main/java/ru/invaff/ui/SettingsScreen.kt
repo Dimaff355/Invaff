@@ -40,6 +40,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import ru.invaff.Store
+import ru.invaff.data.Scope
 
 private class Link(val key: String, val title: String, val hint: String)
 
@@ -75,6 +76,44 @@ fun SettingsScreen(store: Store, canLock: Boolean, auth: (() -> Unit) -> Unit) =
                 )
             }
             Switch(store.lock, { on -> auth { store.enableLock(on) } }, enabled = canLock || store.lock)
+        }
+    }
+
+    val plan = store.plan
+    Section("Прогноз целей")
+    Card(Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            NumberField("Пополнения, ₽ в месяц", plan.monthly) { store.update(plan.copy(monthly = it)) }
+            NumberField("Рост цены бумаг, % в год", plan.growth) { store.update(plan.copy(growth = it ?: 0.0)) }
+            Text(
+                "Пусто в пополнениях — среднее чистое пополнение за последний год по операциям: ${money(store.ui.deposits)} в месяц. " +
+                    "Дивиденды и купоны реинвестируются.",
+                style = MaterialTheme.typography.bodySmall, color = muted,
+            )
+        }
+    }
+
+    Section("Потенциальный доход (FIRE)")
+    Card(Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Учитывать продажу капитала")
+                    Text(
+                        "Каждый год продаётся ${share(plan.rate)} капитала — плюсом к дивидендам и купонам",
+                        style = MaterialTheme.typography.bodySmall, color = muted,
+                    )
+                }
+                Switch(plan.fire, { store.update(plan.copy(fire = it)) })
+            }
+            if (plan.fire) {
+                NumberField("Продавать, % в год", plan.rate) { store.update(plan.copy(rate = it ?: 0.0)) }
+                Chips(Scope.entries.map { it.title }, plan.scope.ordinal) { store.update(plan.copy(scope = Scope.entries[it])) }
+                Text(
+                    "Продаваемая часть: ${money(plan.sellable(store.ui.positions))} → ${money(store.ui.sell(plan))} в год",
+                    style = MaterialTheme.typography.bodySmall, color = muted,
+                )
+            }
         }
     }
 

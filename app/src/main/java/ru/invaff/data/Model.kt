@@ -20,16 +20,43 @@ data class Position(
     val color: Int? = null,
     /** URL логотипа (см. [Logos]). */
     val logo: String? = null,
+    val isin: String = "",
 ) {
     val key get() = "$kind:$ticker"
+
+    /** Зарубежный актив: валюта — по тикеру (RUB000UTSTOM, RUB), бумага — по ISIN, без ISIN — по валюте цены. */
+    val foreign get() = when {
+        kind == Kind.Currency -> !ticker.startsWith("RUB")
+        isin.isNotEmpty() -> !isin.startsWith("RU")
+        else -> currency != "RUB"
+    }
     val profitPct get() = if (value - profit != 0.0) profit / (value - profit) * 100 else 0.0
 }
 
-/** Выплата (дивиденд или купон) в рублях. */
-data class Payment(
-    val date: Instant, val ticker: String, val name: String, val amount: Double, val coupon: Boolean, val broker: String,
+/** title — для фильтра, one — для строки операции. */
+enum class OpType(val title: String, val one: String) {
+    Buy("Покупки", "Покупка"), Sell("Продажи", "Продажа"), Dividend("Дивиденды", "Дивиденды"), Coupon("Купоны", "Купон"),
+    Repayment("Погашения", "Погашение"), Deposit("Пополнения", "Пополнение"), Withdraw("Выводы", "Вывод"),
+    Tax("Налоги", "Налог"), Fee("Комиссии", "Комиссия"), Other("Прочее", "Прочее"),
+}
+
+/** Операция по счёту: amount — со знаком, в валюте операции; rub — то же по текущему курсу ЦБ. */
+data class Operation(
+    val date: Instant,
+    val type: OpType,
+    val ticker: String,
+    val name: String,
+    /** Вид бумаги; null — операция без бумаги (пополнение, налог…). */
+    val kind: Kind?,
+    val qty: Double,
+    val amount: Double,
+    val currency: String,
+    val rub: Double,
+    val broker: String,
     val logo: String? = null,
-)
+) {
+    val income get() = type == OpType.Dividend || type == OpType.Coupon
+}
 
 /** Точка графика: t — секунды epoch. */
 data class Point(val t: Long, val v: Double)
@@ -37,7 +64,7 @@ data class Point(val t: Long, val v: Double)
 interface Broker {
     val title: String
     suspend fun positions(fx: Fx): List<Position>
-    suspend fun payments(from: Instant, fx: Fx): List<Payment>
+    suspend fun operations(from: Instant, fx: Fx): List<Operation>
     suspend fun candles(ref: String, from: Instant): List<Point>
 }
 
@@ -67,6 +94,7 @@ fun merge(positions: List<Position>) = positions.groupBy { it.key }.values.map {
             refs = b.refs + a.refs,
             color = a.color ?: b.color,
             logo = a.logo ?: b.logo,
+            isin = a.isin.ifEmpty { b.isin },
         )
     }
 }.sortedByDescending { it.value }

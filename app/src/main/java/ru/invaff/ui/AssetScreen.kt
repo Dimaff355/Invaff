@@ -21,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -40,7 +41,8 @@ fun AssetScreen(p: Position, ui: Ui, store: Store, back: () -> Unit) {
     val candles by produceState(emptyList<Point>(), p.key) {
         value = store.candles(p, Instant.now().minus(365, ChronoUnit.DAYS))
     }
-    val payments = ui.payments.filter { it.ticker == p.ticker }
+    // Тикеры разных бирж совпадают (T — AT&T и Т-Технологии), поэтому сверяется и вид бумаги.
+    val ops = remember(ui.operations, p.key) { ui.operations.filter { it.ticker == p.ticker && (it.kind == null || it.kind == p.kind) } }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
         item {
             IconButton(back, Modifier.padding(start = 0.dp)) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") }
@@ -74,8 +76,9 @@ fun AssetScreen(p: Position, ui: Ui, store: Store, back: () -> Unit) {
                 "Брокеры: " + p.refs.keys.joinToString(), Modifier.padding(top = 8.dp),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (payments.isNotEmpty()) Section("Выплаты · ${money(payments.sumOf { it.amount })}")
+            val income = ops.filter { it.income }.sumOf { it.rub }
+            if (ops.isNotEmpty()) Section("Операции" + if (income > 0) " · выплаты ${money(income)}" else "")
         }
-        items(payments) { PaymentRow(it) }
+        items(ops) { OperationRow(it) }
     }
 }

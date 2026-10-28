@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -46,12 +47,14 @@ import ru.invaff.ui.AssetScreen
 import ru.invaff.ui.AssetsScreen
 import ru.invaff.ui.IncomeScreen
 import ru.invaff.ui.InvaffTheme
+import ru.invaff.ui.OperationsScreen
 import ru.invaff.ui.PortfolioScreen
 import ru.invaff.ui.SettingsScreen
 
 private val tabs = listOf(
     "Портфель" to Icons.Filled.Home,
     "Активы" to Icons.AutoMirrored.Filled.List,
+    "Операции" to Icons.Filled.Menu,
     "Доходы" to Icons.Filled.DateRange,
     "Настройки" to Icons.Filled.Settings,
 )
@@ -117,7 +120,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             InvaffTheme {
                 if (store.locked) return@InvaffTheme LockScreen { authenticate { store.locked = false } }
-                var tab by rememberSaveable { mutableIntStateOf(if (store.connected.isEmpty()) 3 else 0) }
+                var tab by rememberSaveable { mutableIntStateOf(if (store.connected.isEmpty()) tabs.lastIndex else 0) }
                 var asset by rememberSaveable { mutableStateOf<String?>(null) }
                 BackHandler(asset != null) { asset = null }
                 val ui = store.ui
@@ -137,9 +140,10 @@ class MainActivity : ComponentActivity() {
                         val position = asset?.let { k -> ui.positions.find { it.key == k } }
                         when {
                             position != null -> AssetScreen(position, ui, store, back = { asset = null })
-                            tab == 0 -> PortfolioScreen(ui) { asset = it }
+                            tab == 0 -> PortfolioScreen(ui, store.plan, store::update) { asset = it }
                             tab == 1 -> AssetsScreen(ui) { asset = it }
-                            tab == 2 -> IncomeScreen(ui)
+                            tab == 2 -> OperationsScreen(ui)
+                            tab == 3 -> IncomeScreen(ui, store.plan)
                             else -> SettingsScreen(store, canLock, ::authenticate)
                         }
                     }

@@ -4,6 +4,7 @@ import android.net.Uri
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
@@ -18,7 +19,7 @@ class Finam(private val secret: String) : Broker {
     private val mutex = Mutex()
     private var jwt = ""
     private var jwtUntil = 0L
-    private class Asset(val name: String, val kind: Kind, val logo: String?)
+    private class Asset(val name: String, val kind: Kind, val logo: String?, val isin: String)
 
     private val assets = ConcurrentHashMap<String, Asset>()
 
@@ -71,6 +72,7 @@ class Finam(private val secret: String) : Broker {
             day = p.decimal("daily_pnl") * rate,
             refs = mapOf(title to symbol),
             logo = asset.logo,
+            isin = asset.isin,
         )
     }
 
@@ -84,45 +86,75 @@ class Finam(private val secret: String) : Broker {
                 "CURRENCIES" -> Kind.Currency
                 else -> Kind.Other
             }
-            Asset(a.optString("name"), kind, Logos.byIsin(a.optString("isin")))
-        }.getOrDefault(Asset("", Kind.Other, null))
+            Asset(a.optString("name"), kind, Logos.byIsin(a.optString("isin")), a.optString("isin"))
+        }.getOrDefault(Asset("", Kind.Other, null, ""))
     }
 
     /**
-     * Не больше 1000 транзакций за запрос, поэтому история запрашивается по годам.
-     * Старше ~2017 года истории нет: на такой интервал Финам отвечает 400 «StartTime must be less then endTime» — это пустой год.
+     * Движения денег — /transactions, сделки — /trades. Не больше 1000 записей за запрос, поэтому по годам.
+     * Истории старше ~2017–2018 нет: на такой интервал Финам отвечает 400 — /transactions «'StartTime' must be less then 'endTime'»,
+     * /trades «'endTime' must be greater than seconds: …». Это пустой год, а не ошибка.
+     * Параллельные запросы истории Финам отвергает HTTP 500 «Failed to get transactions» — поэтому строго по очереди
+     * (10 лет ≈ 3 с) и с одним повтором.
      */
-    override suspend fun payments(from: Instant, fx: Fx) = coroutineScope {
+    override suspend fun operations(from: Instant, fx: Fx) = coroutineScope {
         val now = Instant.now()
         val years = generateSequence(from) { it.plus(365, ChronoUnit.DAYS) }.takeWhile { it < now }.toList()
-        val items = accounts().flatMap { id -> years.map { id to it } }.map { (id, start) ->
-            async {
+        val raw = accounts().flatMap { id -> years.flatMap { listOf(Triple(id, it, "transactions"), Triple(id, it, "trades")) } }
+            .flatMap { (id, start, what) ->
                 val end = minOf(start.plus(365, ChronoUnit.DAYS), now)
-                val page = try {
-                    get("accounts/$id/transactions?interval.start_time=${start.sec()}&interval.end_time=${end.sec()}&limit=1000")
-                } catch (e: ApiError) {
-                    if (e.code == 400 && "StartTime" in e.body) JSONObject() else throw e
-                }
-                page.optJSONArray("transactions").objects()
-                    .filter { it.optString("category") == "INCOME" && it.optString("symbol").isNotEmpty() }
-                    .map { id to it }
+                history("accounts/$id/$what?interval.start_time=${start.sec()}&interval.end_time=${end.sec()}&limit=1000")
+                    .optJSONArray(what).objects().map { Triple(id, what == "trades", it) }
             }
-        }.awaitAll().flatten()
-        // Название и логотип — по одному запросу на бумагу, в том числе уже проданную.
-        val found = items.distinctBy { it.second.getString("symbol") }
-            .map { (id, t) -> async { t.getString("symbol").let { it to asset(it, id) } } }.awaitAll().toMap()
-        items.map { (_, t) ->
-            val symbol = t.getString("symbol")
-            Payment(
-                date = Instant.parse(t.getString("timestamp")),
-                ticker = symbol.substringBefore('@'),
-                name = found[symbol]?.name.orEmpty(),
-                amount = t.money("change") * fx[t.getJSONObject("change").optString("currency_code")],
-                coupon = t.optString("transaction_name").contains("упон"),
-                broker = title,
-                logo = found[symbol]?.logo,
-            )
+        // Название, вид и логотип — по одному запросу на бумагу, в том числе уже проданную.
+        val found = raw.filter { it.third.optString("symbol").isNotEmpty() }.distinctBy { it.third.getString("symbol") }
+            .map { (id, _, t) -> async { t.getString("symbol").let { it to asset(it, id) } } }.awaitAll().toMap()
+        raw.map { (_, trade, t) ->
+            val symbol = t.optString("symbol")
+            val a = found[symbol]
+            if (trade) {
+                val buy = t.optString("side") == "SIDE_BUY"
+                val qty = t.decimal("size")
+                val currency = t.optString("currency").ifEmpty { "RUB" }
+                val amount = qty * t.decimal("price") * if (buy) -1 else 1
+                Operation(
+                    Instant.parse(t.getString("timestamp")), if (buy) OpType.Buy else OpType.Sell, symbol.substringBefore('@'),
+                    a?.name.orEmpty(), a?.kind, qty, amount, currency, amount * fx[currency], title, a?.logo,
+                )
+            } else {
+                val change = t.optJSONObject("change")
+                val currency = change?.optString("currency_code").orEmpty().ifEmpty { "RUB" }
+                val amount = t.money("change")
+                val name = t.optString("transaction_name")
+                val type = when (t.optString("category")) {
+                    "DEPOSIT" -> OpType.Deposit
+                    "WITHDRAW" -> OpType.Withdraw
+                    "TAX" -> OpType.Tax
+                    "COMMISSION" -> OpType.Fee
+                    "INCOME" -> when {
+                        symbol.isEmpty() -> OpType.Other
+                        "упон" in name -> OpType.Coupon
+                        "огашен" in name -> OpType.Repayment
+                        else -> OpType.Dividend
+                    }
+                    else -> OpType.Other
+                }
+                Operation(
+                    Instant.parse(t.getString("timestamp")), type, symbol.substringBefore('@'),
+                    a?.name?.ifEmpty { null } ?: name, a?.kind, t.decimal("change_qty"), amount, currency, amount * fx[currency], title, a?.logo,
+                )
+            }
         }.distinct()
+    }
+
+    private suspend fun history(path: String, retry: Boolean = true): JSONObject = try {
+        get(path)
+    } catch (e: ApiError) {
+        when {
+            e.code == 400 && ("'StartTime'" in e.body || "'endTime'" in e.body) -> JSONObject()
+            e.code == 500 && retry -> { delay(1_000); history(path, false) }
+            else -> throw e
+        }
     }
 
     override suspend fun candles(ref: String, from: Instant) =

@@ -1,6 +1,7 @@
 package ru.invaff
 
 import android.app.Application
+import android.content.SharedPreferences
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -17,7 +18,9 @@ import ru.invaff.data.Finam
 import ru.invaff.data.Fx
 import ru.invaff.data.Kind
 import ru.invaff.data.Logos
-import ru.invaff.data.Payment
+import ru.invaff.data.OpType
+import ru.invaff.data.Operation
+import ru.invaff.data.Plan
 import ru.invaff.data.Point
 import ru.invaff.data.Position
 import ru.invaff.data.TBank
@@ -27,7 +30,7 @@ import java.time.Instant
 import java.time.temporal.ChronoUnit
 
 class App : Application() {
-    val store by lazy { Store(Vault(this)) }
+    val store by lazy { Store(Vault(this), getSharedPreferences("settings", MODE_PRIVATE)) }
 
     override fun onCreate() {
         super.onCreate()
@@ -37,8 +40,8 @@ class App : Application() {
 
 data class Ui(
     val positions: List<Position> = emptyList(),
-    /** Дивиденды и купоны за [Store.HISTORY_DAYS], новые сверху. */
-    val payments: List<Payment> = emptyList(),
+    /** Все операции за [Store.HISTORY_DAYS], новые сверху. */
+    val operations: List<Operation> = emptyList(),
     /** Стоимость текущего состава портфеля за год (по дневным закрытиям). */
     val history: List<Point> = emptyList(),
     val loading: Boolean = false,
@@ -46,14 +49,40 @@ data class Ui(
 ) {
     val total get() = positions.sumOf { it.value }
 
+    /** Дивиденды и купоны, новые сверху. */
+    val payments by lazy { operations.filter { it.income } }
+
+    private val yearAgo get() = Instant.now().minus(365, ChronoUnit.DAYS)
+
     /** Пассивный доход за последние 12 месяцев. */
-    val income get() = payments.filter { it.date > Instant.now().minus(365, ChronoUnit.DAYS) }.sumOf { it.amount }
+    val income by lazy { payments.filter { it.date > yearAgo }.sumOf { it.rub } }
+
+    /** Средние чистые пополнения в месяц за последний год (не меньше нуля). */
+    val deposits by lazy {
+        operations.filter { it.date > yearAgo && (it.type == OpType.Deposit || it.type == OpType.Withdraw) }
+            .sumOf { it.rub }.div(12).coerceAtLeast(0.0)
+    }
+
+    /** Продажа части капитала по правилу FIRE, в год. */
+    fun sell(plan: Plan) = if (plan.fire) plan.sellable(positions) * plan.rate / 100 else 0.0
+
+    /** Потенциальный пассивный доход в год: дивиденды и купоны + продажа по FIRE, если включена. */
+    fun passive(plan: Plan) = income + sell(plan)
 }
 
 /** Единственный источник состояния приложения; живёт в Application, поэтому переживает поворот экрана. */
-class Store(private val vault: Vault) {
+class Store(private val vault: Vault, private val prefs: SharedPreferences) {
     var ui by mutableStateOf(Ui())
         private set
+
+    /** Цели, допущения прогноза и настройки FIRE. */
+    var plan by mutableStateOf(Plan.load(prefs))
+        private set
+
+    fun update(p: Plan) {
+        plan = p
+        p.save(prefs)
+    }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var brokers = brokers()
@@ -105,16 +134,16 @@ class Store(private val vault: Vault) {
                 val fx = Fx.load()
                 val from = Instant.now().minus(HISTORY_DAYS, ChronoUnit.DAYS)
                 brokers.values.map { b ->
-                    // Позиции и выплаты независимы: сбой одного не прячет другое.
+                    // Позиции и операции независимы: сбой одного не прячет другое.
                     async {
-                        val payments = async { runCatching { b.payments(from, fx) }.onFailure { errors += "${b.title}, выплаты: ${it.message}" }.getOrDefault(emptyList()) }
+                        val ops = async { runCatching { b.operations(from, fx) }.onFailure { errors += "${b.title}, операции: ${it.message}" }.getOrDefault(emptyList()) }
                         val positions = runCatching { b.positions(fx) }.onFailure { errors += "${b.title}: ${it.message}" }.getOrDefault(emptyList())
-                        positions to payments.await()
+                        positions to ops.await()
                     }
                 }.awaitAll()
             }.onFailure { errors += "Курсы ЦБ: ${it.message}" }.getOrDefault(emptyList())
             val positions = merge(data.flatMap { it.first })
-            ui = ui.copy(positions = positions, payments = data.flatMap { it.second }.sortedByDescending { it.date }, errors = errors)
+            ui = ui.copy(positions = positions, operations = data.flatMap { it.second }.sortedByDescending { it.date }, errors = errors)
             ui = ui.copy(history = history(positions), loading = false)
         }
     }
