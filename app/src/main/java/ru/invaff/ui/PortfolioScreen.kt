@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -27,14 +28,27 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ru.invaff.Ui
 import ru.invaff.data.Plan
+import ru.invaff.data.Point
 import java.time.Instant
+import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 
 val periods = listOf("1М" to 30L, "3М" to 91L, "6М" to 182L, "1Г" to 365L)
 
+/** График с выбором периода: готовые варианты или свой интервал в пределах загруженных точек. */
+@Composable
+fun PeriodChart(points: List<Point>, format: (Double) -> String, default: Int) {
+    var period by rememberSaveable { mutableIntStateOf(default) }
+    var custom by rememberSaveable { mutableStateOf<Days?>(null) }
+    val (from, to) = custom?.takeIf { period == periods.size }?.seconds()
+        ?: (Instant.now().minus(periods[period.coerceAtMost(periods.lastIndex)].second, ChronoUnit.DAYS).epochSecond to Long.MAX_VALUE)
+    LineChart(points.filter { it.t in from until to }, format)
+    val min = points.firstOrNull()?.let { Instant.ofEpochSecond(it.t).atZone(ZoneId.systemDefault()).toLocalDate() }
+    PeriodChips(periods.map { it.first }, period, custom, min, { period = it }) { custom = it }
+}
+
 @Composable
 fun PortfolioScreen(ui: Ui, plan: Plan, update: (Plan) -> Unit, open: (String) -> Unit) {
-    var period by rememberSaveable { mutableIntStateOf(3) }
     val total = ui.total
     val profit = ui.positions.sumOf { it.profit }
     val day = ui.positions.sumOf { it.day }
@@ -49,14 +63,13 @@ fun PortfolioScreen(ui: Ui, plan: Plan, update: (Plan) -> Unit, open: (String) -
             )
             Text("${signed(day)} сегодня", color = tone(day), style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.size(16.dp))
-            val from = Instant.now().minus(periods[period].second, ChronoUnit.DAYS).epochSecond
-            LineChart(ui.history.filter { it.t >= from }, ::money)
-            Chips(periods.map { it.first }, period) { period = it }
+            PeriodChart(ui.history, ::money, default = 3)
         }
         item {
             Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Stat("Пассивный доход", money(ui.income), Modifier.weight(1f), Up)
-                Stat("Дох-ть за год", share(if (total > 0) ui.income / total * 100 else 0.0), Modifier.weight(1f))
+                val income = ui.income(plan)
+                Stat("Пассивный доход", money(income), Modifier.weight(1f), Up)
+                Stat("Дох-ть за год", share(if (total > 0) income / total * 100 else 0.0), Modifier.weight(1f))
             }
         }
         item { Goals(ui, plan, update) }

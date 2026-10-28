@@ -19,10 +19,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,7 +35,6 @@ import java.time.temporal.ChronoUnit
 
 @Composable
 fun AssetScreen(p: Position, ui: Ui, store: Store, back: () -> Unit) {
-    var period by rememberSaveable { mutableIntStateOf(1) }
     val candles by produceState(emptyList<Point>(), p.key) {
         value = store.candles(p, Instant.now().minus(365, ChronoUnit.DAYS))
     }
@@ -58,9 +55,7 @@ fun AssetScreen(p: Position, ui: Ui, store: Store, back: () -> Unit) {
             Text(price(p.price, p.currency), style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.SemiBold)
             Text("${signed(p.day)} сегодня", color = tone(p.day))
             Spacer(Modifier.size(16.dp))
-            val from = Instant.now().minus(periods[period].second, ChronoUnit.DAYS).epochSecond
-            LineChart(candles.filter { it.t >= from }, { price(it, p.currency) })
-            Chips(periods.map { it.first }, period) { period = it }
+            PeriodChart(candles, { price(it, p.currency) }, default = 1)
 
             Section("В портфеле")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

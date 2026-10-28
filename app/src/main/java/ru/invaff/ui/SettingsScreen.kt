@@ -80,6 +80,19 @@ fun SettingsScreen(store: Store, canLock: Boolean, auth: (() -> Unit) -> Unit) =
     }
 
     val plan = store.plan
+    Section("Налог")
+    Card(Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            NumberField("Ставка НДФЛ, %", plan.tax) { store.update(plan.copy(tax = (it ?: 0.0).coerceIn(0.0, 100.0))) }
+            Text(
+                "Доходы, доходность, цели и FIRE считаются после налога; 0 — не учитывать. " +
+                    "Дивиденды Финама уже приходят за вычетом налога — повторно он не вычитается. " +
+                    "При продаже по FIRE налог берётся только с доли прибыли. Льготы (ЛДВ, ИИС) не учитываются.",
+                style = MaterialTheme.typography.bodySmall, color = muted,
+            )
+        }
+    }
+
     Section("Прогноз целей")
     Card(Modifier.fillMaxWidth()) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

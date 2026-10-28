@@ -31,7 +31,7 @@ fun Goals(ui: Ui, plan: Plan, update: (Plan) -> Unit) {
     var edit by remember { mutableStateOf<Boolean?>(null) } // true — капитал, false — доход
     val total = ui.total
     val monthly = plan.monthly ?: ui.deposits
-    val yield = if (total > 0) ui.income / total else 0.0
+    val yield = if (total > 0) ui.income(plan) / total else 0.0
     val sellShare = if (total > 0) ui.sell(plan) / total else 0.0
     Section("Цели")
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

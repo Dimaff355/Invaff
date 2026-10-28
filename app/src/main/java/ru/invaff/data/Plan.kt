@@ -24,20 +24,36 @@ data class Plan(
     val fire: Boolean = false,
     val rate: Double = 4.0,
     val scope: Scope = Scope.All,
+    /** Ставка налога на доход, %; 0 — не учитывать. */
+    val tax: Double = 13.0,
 ) {
     fun save(prefs: SharedPreferences) = prefs.edit().putString(
         KEY, JSONObject().put("capital", capital).put("income", income).put("monthly", monthly ?: -1.0)
-            .put("growth", growth).put("fire", fire).put("rate", rate).put("scope", scope.name).toString()
+            .put("growth", growth).put("fire", fire).put("rate", rate).put("scope", scope.name).put("tax", tax).toString()
     ).apply()
 
-    /** Капитал, с которого продаётся rate% в год. */
-    fun sellable(positions: List<Position>) = positions.filter {
+    /** Выплата после налога: уже удержанный у источника (дивиденды Финама) повторно не вычитается. */
+    fun net(o: Operation) = if (o.taxed) o.rub else o.rub * (1 - tax / 100)
+
+    private fun part(positions: List<Position>) = positions.filter {
         when (scope) {
             Scope.All -> true
             Scope.Russia -> !it.foreign
             Scope.Foreign -> it.foreign
         }
-    }.sumOf { it.value }
+    }
+
+    /** Капитал, с которого продаётся rate% в год. */
+    fun sellable(positions: List<Position>) = part(positions).sumOf { it.value }
+
+    /** Продажа rate% выбранной части в год после налога: налог только с доли прибыли в проданном. */
+    fun sell(positions: List<Position>): Double {
+        val p = part(positions)
+        val value = p.sumOf { it.value }
+        if (!fire || value <= 0) return 0.0
+        val gain = (p.sumOf { it.profit } / value).coerceIn(0.0, 1.0)
+        return value * rate / 100 * (1 - gain * tax / 100)
+    }
 
     /**
      * Месяцев до момента, когда reached(капитал) станет true; null — не достигается за 100 лет.
@@ -66,6 +82,7 @@ data class Plan(
                 fire = j.optBoolean("fire"),
                 rate = j.optDouble("rate", 4.0),
                 scope = Scope.valueOf(j.optString("scope", Scope.All.name)),
+                tax = j.optDouble("tax", 13.0),
             )
         }.getOrDefault(Plan())
     }

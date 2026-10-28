@@ -139,9 +139,12 @@ class Finam(private val secret: String) : Broker {
                     }
                     else -> OpType.Other
                 }
+                // Дивиденды Финам зачисляет уже за вычетом НДФЛ (проверено на MRKP: на акцию ровно как у Т-Банка после налога),
+                // купоны — до налога: НДФЛ списывается отдельно в конце года.
                 Operation(
                     Instant.parse(t.getString("timestamp")), type, symbol.substringBefore('@'),
                     a?.name?.ifEmpty { null } ?: name, a?.kind, t.decimal("change_qty"), amount, currency, amount * fx[currency], title, a?.logo,
+                    taxed = type == OpType.Dividend,
                 )
             }
         }.distinct()

@@ -54,6 +54,8 @@ data class Operation(
     val rub: Double,
     val broker: String,
     val logo: String? = null,
+    /** Сумма уже за вычетом налога (удержан у источника). */
+    val taxed: Boolean = false,
 ) {
     val income get() = type == OpType.Dividend || type == OpType.Coupon
 }

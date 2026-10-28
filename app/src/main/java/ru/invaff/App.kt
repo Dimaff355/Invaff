@@ -54,8 +54,10 @@ data class Ui(
 
     private val yearAgo get() = Instant.now().minus(365, ChronoUnit.DAYS)
 
-    /** Пассивный доход за последние 12 месяцев. */
-    val income by lazy { payments.filter { it.date > yearAgo }.sumOf { it.rub } }
+    private val lastYear by lazy { payments.filter { it.date > yearAgo } }
+
+    /** Пассивный доход за последние 12 месяцев после налога. */
+    fun income(plan: Plan) = lastYear.sumOf(plan::net)
 
     /** Средние чистые пополнения в месяц за последний год (не меньше нуля). */
     val deposits by lazy {
@@ -63,11 +65,11 @@ data class Ui(
             .sumOf { it.rub }.div(12).coerceAtLeast(0.0)
     }
 
-    /** Продажа части капитала по правилу FIRE, в год. */
-    fun sell(plan: Plan) = if (plan.fire) plan.sellable(positions) * plan.rate / 100 else 0.0
+    /** Продажа части капитала по правилу FIRE в год после налога; 0, если выключена. */
+    fun sell(plan: Plan) = plan.sell(positions)
 
-    /** Потенциальный пассивный доход в год: дивиденды и купоны + продажа по FIRE, если включена. */
-    fun passive(plan: Plan) = income + sell(plan)
+    /** Потенциальный пассивный доход в год после налога: дивиденды и купоны + продажа по FIRE, если включена. */
+    fun passive(plan: Plan) = income(plan) + sell(plan)
 }
 
 /** Единственный источник состояния приложения; живёт в Application, поэтому переживает поворот экрана. */

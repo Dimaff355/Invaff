@@ -5,19 +5,12 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -32,10 +25,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ru.invaff.Ui
 import ru.invaff.data.Operation
+import java.time.Instant
 import java.time.YearMonth
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 
-/** Лента всех операций с фильтрами по типу операции, виду бумаги и поиском по тикеру/названию. */
+private val opPeriods = listOf("Всё время" to 0L, "1М" to 30L, "3М" to 91L, "1Г" to 365L)
+
+/** Лента всех операций с фильтрами по периоду, типу операции, виду бумаги и поиском по тикеру/названию. */
 @Composable
 fun OperationsScreen(ui: Ui) {
     val ops = ui.operations
@@ -44,12 +41,16 @@ fun OperationsScreen(ui: Ui) {
     var type by rememberSaveable { mutableIntStateOf(0) }
     var kind by rememberSaveable { mutableIntStateOf(0) }
     var query by rememberSaveable { mutableStateOf("") }
+    var period by rememberSaveable { mutableIntStateOf(0) }
+    var custom by rememberSaveable { mutableStateOf<Days?>(null) }
     val t = types.getOrNull(type - 1)
     val k = kinds.getOrNull(kind - 1)
     val q = query.trim()
-    val shown = remember(ops, t, k, q) {
+    val (from, to) = custom?.takeIf { period == opPeriods.size }?.seconds()
+        ?: (opPeriods[period].second.takeIf { it > 0 }?.let { Instant.now().minus(it, ChronoUnit.DAYS).epochSecond } ?: 0L) to Long.MAX_VALUE
+    val shown = remember(ops, t, k, q, from, to) {
         ops.filter {
-            (t == null || it.type == t) && (k == null || it.kind == k) &&
+            (t == null || it.type == t) && (k == null || it.kind == k) && it.date.epochSecond in from until to &&
                 (q.isEmpty() || it.ticker.contains(q, true) || it.name.contains(q, true))
         }
     }
@@ -58,14 +59,11 @@ fun OperationsScreen(ui: Ui) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
         item {
             Title("Операции")
-            OutlinedTextField(
-                query, { query = it }, Modifier.fillMaxWidth(),
-                placeholder = { Text("Тикер или название") },
-                leadingIcon = { Icon(Icons.Filled.Search, null) },
-                trailingIcon = { if (query.isNotEmpty()) IconButton({ query = "" }) { Icon(Icons.Filled.Clear, "Очистить") } },
-                singleLine = true,
-            )
+            SearchField(query) { query = it }
             Spacer(Modifier.height(12.dp))
+            val min = ops.lastOrNull()?.date?.atZone(ZoneId.systemDefault())?.toLocalDate()
+            PeriodChips(opPeriods.map { it.first }, period, custom, min, { period = it }) { custom = it }
+            Spacer(Modifier.height(4.dp))
             Chips(listOf("Все операции") + types.map { it.title }, type) { type = it }
             Spacer(Modifier.height(4.dp))
             Chips(listOf("Все бумаги") + kinds.map { it.title }, kind) { kind = it }

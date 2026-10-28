@@ -17,7 +17,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -157,3 +162,13 @@ fun NumberField(label: String, value: Double?, modifier: Modifier = Modifier.fil
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
     )
 }
+
+/** Поиск по тикеру или названию с кнопкой очистки. */
+@Composable
+fun SearchField(query: String, onChange: (String) -> Unit) = OutlinedTextField(
+    query, onChange, Modifier.fillMaxWidth(),
+    placeholder = { Text("Тикер или название") },
+    leadingIcon = { Icon(Icons.Filled.Search, null) },
+    trailingIcon = { if (query.isNotEmpty()) IconButton({ onChange("") }) { Icon(Icons.Filled.Clear, "Очистить") } },
+    singleLine = true,
+)
